@@ -9,11 +9,8 @@
 #
 #  Code does the following:
 #     - Import and sanity-check the following variables from HA/config.yaml
-#         HA_USERNAME
-#         HA_PASSWORD
 #         HA_URL
 #         HA_DASHBOARD
-#         LOGIN_DELAY
 #         ZOOM_LEVEL
 #         BROWSER_REFRESH
 #         SCREEN_TIMEOUT
@@ -123,7 +120,6 @@ load_config_var() {
 
 load_config_var HA_URL "http://localhost:8123"
 load_config_var HA_DASHBOARD ""
-load_config_var LOGIN_DELAY 1.0
 load_config_var ZOOM_LEVEL 100
 load_config_var BROWSER_REFRESH 600
 load_config_var SCREEN_TIMEOUT 600  # Default to 600 seconds
