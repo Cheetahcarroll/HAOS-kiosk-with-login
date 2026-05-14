@@ -106,8 +106,6 @@ options:
   debug_mode: false
 
 schema:
-  ha_username: str
-  ha_password: password
   ha_url: str
   ha_dashboard: str?
   login_delay: float(0,)
