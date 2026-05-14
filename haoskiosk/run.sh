@@ -121,8 +121,6 @@ load_config_var() {
     fi
 }
 
-load_config_var HA_USERNAME
-load_config_var HA_PASSWORD "" 1  #Mask password in log
 load_config_var HA_URL "http://localhost:8123"
 load_config_var HA_DASHBOARD ""
 load_config_var LOGIN_DELAY 1.0
@@ -150,12 +148,6 @@ load_config_var REST_BEARER_TOKEN "" 1  # Mask token in log
 load_config_var COMMAND_WHITELIST "^$"  # Default is no commands allowed
 load_config_var DEBUG_MODE false
 load_config_var VNC_SERVER ""  1 #Mask password in log
-
-# Validate environment variables set by config.yaml
-if [ -z "$HA_USERNAME" ] || [ -z "$HA_PASSWORD" ]; then
-    bashio::log.error "Error: HA_USERNAME and HA_PASSWORD must be set"
-    exit 1
-fi
 
 ################################################################################
 ### GTK and DBUS-related environment variables to improve stability
