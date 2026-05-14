@@ -108,7 +108,6 @@ options:
 schema:
   ha_url: str
   ha_dashboard: str?
-  login_delay: float(0,)
   zoom_level: int(10,1000)
   browser_refresh: int(0,)
   screen_timeout: int(0,)
