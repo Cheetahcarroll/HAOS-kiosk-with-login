@@ -52,19 +52,14 @@ local MAX_LOAD_FAILURES = 5  -- Maximum number of consecutive page (re)load fail
 
 -- Load in environment variables to configure options
 local defaults = {
-    HA_USERNAME = "",
-    HA_PASSWORD = "",
     HA_URL = "http://localhost:8123",
     DARK_MODE = true,
     HA_SIDEBAR = "",
     HA_THEME = "",
 
-    LOGIN_DELAY = 1,
     ZOOM_LEVEL = 100,
     BROWSER_REFRESH = 600,
                         }
-local username = os.getenv("HA_USERNAME") or defaults.HA_USERNAME
-local password = os.getenv("HA_PASSWORD") or defaults.HA_PASSWORD
 
 local ha_url = os.getenv("HA_URL") or defaults.HA_URL  -- Starting URL
 if not ha_url:match("^https?://[%w%.%-%%:]+[/%?%#]?[/%w%.%-%?%#%=%%]*$") then
@@ -111,12 +106,6 @@ if theme ~= "" then
     msg.info("Forcing HA_THEME to: %s", theme)
 end
 
-local login_delay = tonumber(os.getenv("LOGIN_DELAY")) or defaults.LOGIN_DELAY -- Delay in seconds before auto-login
-if login_delay <= 0 then
-    msg.warn("Invalid LOGIN_DELAY value: '%s'; defaulting to %d", os.getenv("LOGIN_DELAY") or "", defaults.LOGIN_DELAY)
-    login_delay = defaults.LOGIN_DELAY
-end
-
 local zoom_level = tonumber(os.getenv("ZOOM_LEVEL")) or defaults.ZOOM_LEVEL
 if zoom_level <= 0 then
     msg.warn("Invalid ZOOM_LEVEL value: '%s'; defaulting to %d", os.getenv("ZOOM_LEVEL") or "", defaults.ZOOM_LEVEL)
@@ -131,8 +120,8 @@ end
 
 local onscreen_keyboard = os.getenv("ONSCREEN_KEYBOARD") == "true"
 
-msg.info("USERNAME=%s; URL=%s; DARK_MODE=%s; SIDEBAR=%s; THEME=%s; LOGIN_DELAY=%.1f, ZOOM_LEVEL=%d, BROWSER_REFRESH=%d,  ONSCREEN_KEYBOARD=%s",
-    username, ha_url, tostring(dark_mode), sidebar, theme, login_delay, zoom_level, browser_refresh, tostring(onscreen_keyboard))
+msg.info("URL=%s; DARK_MODE=%s; SIDEBAR=%s; THEME=%s; ZOOM_LEVEL=%d, BROWSER_REFRESH=%d,  ONSCREEN_KEYBOARD=%s",
+    ha_url, tostring(dark_mode), sidebar, theme, zoom_level, browser_refresh, tostring(onscreen_keyboard))
 
 -- -----------------------------------------------------------------------
 -- Forward console messages to stdout
@@ -241,54 +230,6 @@ webview.add_signal("init", function(view)
         -- Force passthrough mode on every page load so don't inadvertently type commands in kiosk
         webview.window(v):set_mode("passthrough")
 
-        -- Set up auto-login for Home Assistant
-        -- Check if current URL matches the Home Assistant auth page
-        if v.uri:match("^" .. ha_url_base .. "/auth/authorize%?response_type=code") then
-            msg.info("Authorizing: %s", v.uri) -- DEBUG
-            -- JavaScript to auto-fill and submit the login form
-            local js_auto_login = string.format([[
-                setTimeout(function() {
-                    try {
-                        // 2026.4+ working version uses shadowRoot; preserve backward-compatibility
-                        const haInputs = document.querySelectorAll('ha-input');
-                        const usernameField = haInputs[0]?.shadowRoot?.querySelector('wa-input')?.shadowRoot?.querySelector('input[autocomplete="username"]')
-                            || document.querySelector('input[autocomplete="username"]');
-                        const passwordField = haInputs[1]?.shadowRoot?.querySelector('wa-input')?.shadowRoot?.querySelector('input[autocomplete="current-password"]')
-                            || document.querySelector('input[autocomplete="current-password"]');
-                        const haCheckbox = document.querySelector('ha-checkbox');
-                        const submitButton = document.querySelector('ha-button');
-
-                        if (usernameField && passwordField) {  // Note post 2026.4 requires 'change' event oo
-                            usernameField.value = '%s';
-                            usernameField.dispatchEvent(new Event('input', { bubbles: true }));
-                            usernameField.dispatchEvent(new Event('change', { bubbles: true }));
-
-                            passwordField.value = '%s';
-                            passwordField.dispatchEvent(new Event('input', { bubbles: true }));
-                            passwordField.dispatchEvent(new Event('change', { bubbles: true }));
-
-                            console.log('Auto-login: fields filled + events dispatched');
-                        } else {
-                            console.log('Auto-login failed: missing elements', {
-                                username: !!usernameField,
-                                password: !!passwordField,
-                                submit: !!submitButton
-                            });
-                        }
-
-                        if (haCheckbox) {
-                            haCheckbox.setAttribute('checked', '');
-                            haCheckbox.dispatchEvent(new Event('change', { bubbles: true }));
-                        }
-
-                        if (submitButton) submitButton.click();
-                    } catch(e) { console.warn('Auto-login JS error:', e); }
-                }, %d);
-            ]], single_quote_escape(username), single_quote_escape(password), login_delay * 1000)
-
-            msg.info("Logging in: (username: %s): %s", username, v.uri) -- DEBUG
-            v:eval_js(js_auto_login, { source = "auto_login.js", no_return = true })  -- Execute the login script
-        end
 
         -- Set Home Assistant theme and sidebar visibility after dashboard load
         if not ha_settings_applied[v] -- Check if not set yet and current URL starts with ha_url but not an auth page
