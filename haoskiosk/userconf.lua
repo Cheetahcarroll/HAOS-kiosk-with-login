@@ -49,6 +49,9 @@ local modes = package.loaded["modes"]
 local new_escape_key = "<Control-Mod1-Escape>" -- Ctl+Alt+Esc
 local HARD_RELOAD_FREQ = 10  -- Frequency of fully reloading cache when refreshing page
 local MAX_LOAD_FAILURES = 5  -- Maximum number of consecutive page (re)load failures per view before restarting luakit
+local AUTH_LOGIN_DELAY_MS = 1000   -- Wait for HA auth web components before injecting picker/login JS
+local AUTH_LOGIN_RETRY_MS = 1000   -- Retry interval while auth page is still loading
+local AUTH_LOGIN_MAX_ATTEMPTS = 15 -- Stop retrying after this many attempts
 
 
 -- Load in environment variables to configure options
@@ -211,7 +214,7 @@ end
 
 local function build_js_auto_login(username, password)
     return string.format([[
-        function() {
+        setTimeout(function() {
             try {
                 const haInputs = document.querySelectorAll('ha-input');
                 const usernameField = haInputs[0]?.shadowRoot?.querySelector('wa-input')?.shadowRoot?.querySelector('input[autocomplete="username"]')
@@ -246,13 +249,14 @@ local function build_js_auto_login(username, password)
 
                 if (submitButton) submitButton.click();
             } catch(e) { console.warn('Auto-login JS error:', e); }
-        };
-    ]], single_quote_escape(username), single_quote_escape(password))
+        }, %d);
+    ]], single_quote_escape(username), single_quote_escape(password), AUTH_LOGIN_DELAY_MS)
 end
 
 local function build_js_user_picker(users_json)
     return string.format([[
-        function() {
+        setTimeout(function() {
+            try {
             if (document.getElementById('haoskiosk-user-picker')) return;
 
             const users = %s;
@@ -310,9 +314,11 @@ local function build_js_user_picker(users_json)
                 overlay.appendChild(btn);
             });
 
-            document.body.appendChild(overlay);
-        };
-    ]], users_json)
+            (document.body || document.documentElement).appendChild(overlay);
+            console.log('haoskiosk: user picker shown (' + users.length + ' users)');
+            } catch(e) { console.warn('haoskiosk picker error:', e); }
+        }, %d);
+    ]], users_json, AUTH_LOGIN_DELAY_MS)
 end
 
 -- -----------------------------------------------------------------------
@@ -326,6 +332,14 @@ local consecutive_load_failures = setmetatable({}, { __mode = "k" })  -- Weak ke
 local ha_settings_applied = setmetatable({}, { __mode = "k" }) -- Flag to track if HA settings have already been applied in this session
 local auth_login_handled = setmetatable({}, { __mode = "k" }) -- Per-view flag: picker shown or auto-login completed for this auth visit
 local auth_login_timers = setmetatable({}, { __mode = "k" }) -- Per-view retry timers for auth page injection
+
+local function stop_auth_login_timer(v)
+    local t = auth_login_timers[v]
+    if t then
+        t:stop()
+        auth_login_timers[v] = nil
+    end
+end
 
 local function auth_picker_visible(v, callback)
     v:eval_js([[
@@ -345,22 +359,38 @@ end
 
 local function start_auth_login_flow(v)
     if auth_login_handled[v] then return end
+    stop_auth_login_timer(v)
 
+    local timer_mod = require "timer"
+    local retry_timer = timer_mod { interval = AUTH_LOGIN_RETRY_MS }
+    auth_login_timers[v] = retry_timer
     local attempt = 0
 
     local function finish()
         auth_login_handled[v] = true
+        stop_auth_login_timer(v)
     end
 
     local function step()
         if not v.is_alive or auth_login_handled[v] then
+            stop_auth_login_timer(v)
             return
         end
         if not is_auth_authorize_page(v.uri) then
+            stop_auth_login_timer(v)
+            return
+        end
+
+        attempt = attempt + 1
+        if attempt > AUTH_LOGIN_MAX_ATTEMPTS then
+            msg.warn("User picker timed out after %d attempts: %s", AUTH_LOGIN_MAX_ATTEMPTS, v.uri or "")
+            finish()
             return
         end
 
         -- Always show the picker when any users are configured (touch to choose account)
+        msg.info("User picker attempt %d/%d (%d users): %s",
+            attempt, AUTH_LOGIN_MAX_ATTEMPTS, #ha_users_list, v.uri or "")
         v:eval_js(build_js_user_picker(build_ha_users_json(ha_users_list)),
             { source = "user_picker.js", no_return = true })
         auth_picker_visible(v, function(visible)
@@ -371,6 +401,8 @@ local function start_auth_login_flow(v)
         end)
     end
 
+    retry_timer:add_signal("timeout", step)
+    retry_timer:start()
     step()
 end
 
@@ -433,6 +465,7 @@ webview.add_signal("init", function(view)
         -- Reset auth login state when leaving the authorize page (e.g. after logout)
         if v.uri and not is_auth_authorize_page(v.uri) then
             auth_login_handled[v] = nil
+            stop_auth_login_timer(v)
         end
 
         -- User picker on the Home Assistant login / authorize page
