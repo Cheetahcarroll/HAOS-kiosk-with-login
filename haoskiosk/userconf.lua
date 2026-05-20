@@ -202,6 +202,13 @@ local function build_ha_users_json(users)
     return "[" .. table.concat(parts, ",") .. "]"
 end
 
+local function is_auth_authorize_page(uri)
+    if not uri then return false end
+    -- Match path only: HA may redirect localhost <-> 127.0.0.1 with different hosts
+    return uri:match("/auth/authorize") ~= nil
+        or uri:match("/auth/login") ~= nil
+end
+
 local function build_js_auto_login(username, password)
     return string.format([[
         function() {
@@ -239,7 +246,7 @@ local function build_js_auto_login(username, password)
 
                 if (submitButton) submitButton.click();
             } catch(e) { console.warn('Auto-login JS error:', e); }
-        }());
+        };
     ]], single_quote_escape(username), single_quote_escape(password))
 end
 
@@ -304,7 +311,7 @@ local function build_js_user_picker(users_json)
             });
 
             document.body.appendChild(overlay);
-        }();
+        };
     ]], users_json)
 end
 
@@ -317,7 +324,55 @@ local consecutive_load_failures = setmetatable({}, { __mode = "k" })  -- Weak ke
 -- Auto-login to homeassistant (if on HA url) and set 'sidebar settings
 
 local ha_settings_applied = setmetatable({}, { __mode = "k" }) -- Flag to track if HA settings have already been applied in this session
-local auth_login_handled = setmetatable({}, { __mode = "k" }) -- Per-view flag: picker shown or auto-login started for this auth visit
+local auth_login_handled = setmetatable({}, { __mode = "k" }) -- Per-view flag: picker shown or auto-login completed for this auth visit
+local auth_login_timers = setmetatable({}, { __mode = "k" }) -- Per-view retry timers for auth page injection
+
+local function auth_picker_visible(v, callback)
+    v:eval_js([[
+        (function() {
+            return document.getElementById('haoskiosk-user-picker') ? 'yes' : 'no';
+        })();
+    ]], {
+        source = "user_picker_check.js",
+        callback = function(result)
+            callback(result == "yes")
+        end,
+        error_callback = function()
+            callback(false)
+        end,
+    })
+end
+
+local function start_auth_login_flow(v)
+    if auth_login_handled[v] then return end
+
+    local attempt = 0
+
+    local function finish()
+        auth_login_handled[v] = true
+    end
+
+    local function step()
+        if not v.is_alive or auth_login_handled[v] then
+            return
+        end
+        if not is_auth_authorize_page(v.uri) then
+            return
+        end
+
+        -- Always show the picker when any users are configured (touch to choose account)
+        v:eval_js(build_js_user_picker(build_ha_users_json(ha_users_list)),
+            { source = "user_picker.js", no_return = true })
+        auth_picker_visible(v, function(visible)
+            if visible then
+                msg.info("User picker displayed")
+                finish()
+            end
+        end)
+    end
+
+    step()
+end
 
 webview.add_signal("init", function(view)
     ha_settings_applied[view] = false  -- Set theme and sidebar settings once  per view
@@ -376,32 +431,14 @@ webview.add_signal("init", function(view)
         webview.window(v):set_mode("passthrough")
 
         -- Reset auth login state when leaving the authorize page (e.g. after logout)
-        if v.uri and not v.uri:match("^" .. ha_url_base .. "/auth/authorize") then
+        if v.uri and not is_auth_authorize_page(v.uri) then
             auth_login_handled[v] = nil
         end
 
-        -- Auto login user for Home Assistant
-        -- Check if current URL matches the Home Assistant auth page
-        if v.uri:match("^" .. ha_url_base .. "/auth/authorize%?response_type=code")
-           and not auth_login_handled[v] then
-            auth_login_handled[v] = true
-            msg.info("Authorizing: %s", v.uri) -- DEBUG
-
-            local function run_auth_login()
-                if not v.is_alive then return end
-
-                if #ha_users_list == 1 then
-                    local selected = ha_users_list[1]
-                    msg.info("Auto-login as %s", selected.user)
-                    v:eval_js(build_js_auto_login(selected.username, selected.password),
-                        { source = "auto_login.js", no_return = true })
-                else
-                    msg.info("Showing user picker (%d users)", #ha_users_list)
-                    v:eval_js(build_js_user_picker(build_ha_users_json(ha_users_list)),
-                        { source = "user_picker.js", no_return = true })
-                end
-            end
-            run_auth_login()
+        -- User picker on the Home Assistant login / authorize page
+        if is_auth_authorize_page(v.uri) and not auth_login_handled[v] and not auth_login_timers[v] then
+            msg.info("Auth page detected (%d users): %s", #ha_users_list, v.uri)
+            start_auth_login_flow(v)
         end
 
 
