@@ -3,9 +3,9 @@
 ################################################################################
 # Add-on: HAOS Kiosk Display (haoskiosk)
 # File: run.sh
-# Version: 1.3.2
+# Version: 1.3.3
 # Copyright Jeff Kosowsky
-# Date: April 2026
+# Date: May 2026
 #
 #  Code does the following:
 #     - Import and sanity-check the following variables from HA/config.yaml

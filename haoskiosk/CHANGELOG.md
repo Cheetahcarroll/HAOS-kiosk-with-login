@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.3.3 - May 2026
+
+- Added Support for Multi User Login
+
 ## v1.3.2 - April 2026
 
 - Added explicit BUILD_FROM location to Dockerfile for ha core 2026.04+

@@ -1,11 +1,11 @@
 ---
-name: "HAOS Kiosk Display"
+name: "HAOS Kiosk Display with Login"
 description: |
   Start X server and browser on local HAOS server and display dashboards in
-  kiosk mode (Jeff Kosowsky)
-version: "1.3.2"
-slug: "haoskiosk"
-url: https://github.com/puterboy/HAOS-kiosk/tree/main/haoskiosk
+  kiosk mode with support for multi user login
+version: "1.3.3"
+slug: "haoskiosk-with-login"
+url: https://github.com/cheetahcarroll/HAOS-kiosk-with-login/tree/main/haoskiosk-with-login
 
 arch:
   - aarch64

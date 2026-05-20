@@ -1,9 +1,9 @@
 """-------------------------------------------------------------------------------
 # Add-on: HAOS Kiosk Display (haoskiosk)
 # File: services.py
-# Version: 1.3.2
+# Version: 1.3.3
 # Copyright Jeff Kosowsky
-# Date: April 2026
+# Date: May 2026
 
  Launch REST API server with following commands:
    POST /launch_url        {"url": "<url>"}

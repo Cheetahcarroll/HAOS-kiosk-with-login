@@ -1,8 +1,8 @@
-# HAOS-kiosk
+# HAOS-kiosk-with-login
 
 Display HA dashboards in kiosk mode directly on your HAOS server.
 
-## Author: Jeff Kosowsky (version: 1.3.2, April 2026)
+## Author: Jeff Kosowsky (version: 1.3.3, May 2026)
 
 ## Description
 

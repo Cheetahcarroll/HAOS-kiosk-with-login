@@ -12,9 +12,9 @@
 """-------------------------------------------------------------------------------
 # HAOS Kiosk Display — Mouse & Touch Input Engine
 # File: MouseTouchInputs
-# Version: 1.3.2
+# Version: 1.3.3
 # Copyright Jeff Kosowsky
-# Date: April 2026
+# Date: May 2026
 #
 #### DESCRIPTION:
    Full-featured X11 parser and command launcher for multi-button press and
@@ -369,7 +369,7 @@ from typing import Any, cast, Callable, ClassVar, Final, Iterator, NotRequired, 
 from Xlib import display                  #type: ignore[import-untyped] #pylint: disable=import-error
 from Xlib.xobject.drawable import Window  #type: ignore[import-untyped] #pylint: disable=import-error
 #-------------------------------------------------------------------------------
-__version__ = "1.3.2"
+__version__ = "1.3.3"
 __author__ = "Jeff Kosowsky"
 __copyright__ = "Copyright 2025-2026 Jeff Kosowsky"
 #-------------------------------------------------------------------------------
