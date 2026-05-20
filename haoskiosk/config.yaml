@@ -68,9 +68,9 @@ privileged:
   - SYS_ADMIN
 
 options:
+  ha_users: []
   ha_url: "http://localhost:8123"
   ha_dashboard: ""
-  login_delay: 1.0
   zoom_level: 100
   browser_refresh: 600
   screen_timeout: 0
@@ -106,8 +106,9 @@ options:
   debug_mode: false
 
 schema:
-  user_logins:
-    - username: str
+  ha_users:
+    - user: str
+      username: str
       password: password
   ha_url: str
   ha_dashboard: str?

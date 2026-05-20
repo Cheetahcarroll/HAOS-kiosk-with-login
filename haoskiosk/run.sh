@@ -9,6 +9,7 @@
 #
 #  Code does the following:
 #     - Import and sanity-check the following variables from HA/config.yaml
+#         HA_USERS
 #         HA_URL
 #         HA_DASHBOARD
 #         ZOOM_LEVEL
@@ -118,6 +119,7 @@ load_config_var() {
     fi
 }
 
+load_config_var HA_USERS []
 load_config_var HA_URL "http://localhost:8123"
 load_config_var HA_DASHBOARD ""
 load_config_var ZOOM_LEVEL 100
@@ -144,6 +146,36 @@ load_config_var REST_BEARER_TOKEN "" 1  # Mask token in log
 load_config_var COMMAND_WHITELIST "^$"  # Default is no commands allowed
 load_config_var DEBUG_MODE false
 load_config_var VNC_SERVER ""  1 #Mask password in log
+
+# Validate and expand HA_USERS (JSON array from config) into indexed env vars for userconf.lua
+HA_USERS_JSON="$HA_USERS"
+if ! echo "$HA_USERS_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+    bashio::log.error "Error: At least one HA user must be configured in ha_users"
+    exit 1
+fi
+
+HA_USER_COUNT="$(echo "$HA_USERS_JSON" | jq -r 'length')"
+export HA_USER_COUNT
+bashio::log.info "HA_USER_COUNT=$HA_USER_COUNT"
+
+for ((i = 0; i < HA_USER_COUNT; i++)); do
+    label="$(echo "$HA_USERS_JSON" | jq -r ".[$i].user // .[$i].username // \"User $((i + 1))\" | tostring")"
+    username="$(echo "$HA_USERS_JSON" | jq -r ".[$i].username | tostring")"
+    password="$(echo "$HA_USERS_JSON" | jq -r ".[$i].password | tostring")"
+    if [ -z "$username" ] || [ "$username" = "null" ]; then
+        bashio::log.error "Error: ha_users[$i] is missing username"
+        exit 1
+    fi
+    if [ -z "$password" ] || [ "$password" = "null" ]; then
+        bashio::log.error "Error: ha_users[$i] is missing password"
+        exit 1
+    fi
+    printf -v "HA_USER_${i}_LABEL" '%s' "$label"
+    printf -v "HA_USER_${i}_USERNAME" '%s' "$username"
+    printf -v "HA_USER_${i}_PASSWORD" '%s' "$password"
+    eval "export HA_USER_${i}_LABEL HA_USER_${i}_USERNAME HA_USER_${i}_PASSWORD"
+    bashio::log.info "HA user %d: %s (username=%s)" "$i" "$label" "$username"
+done
 
 ################################################################################
 ### GTK and DBUS-related environment variables to improve stability

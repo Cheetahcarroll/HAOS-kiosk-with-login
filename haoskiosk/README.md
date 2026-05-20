@@ -83,13 +83,7 @@ ______________________________________________________________________
 
 ## Configuration Options
 
-### HA Username [required]
-
-Enter your Home Assistant login name.
-
-### HA Password [required]
-
-Enter your Home Assistant password.
+### HA User Logins
 
 ### HA URL
 

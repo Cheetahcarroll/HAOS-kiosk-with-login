@@ -1,11 +1,9 @@
 ---
 configuration:
-  ha_username:
-    name: "HA Username"
-    description: "Home Assistant login user name [Required]"
-  ha_password:
-    name: "HA Password"
-    description: "Home Assistant login password [Required]"
+  ha_users:
+    name: "User Logins"
+    description: |
+      Add one or more user logins to the HAOS Kiosk.
   ha_url:
     name: "HA URL"
     description: |
@@ -15,11 +13,6 @@ configuration:
   ha_dashboard:
     name: "HA Dashboard"
     description: 'Dashboard path (following "HA URL") [Default: ""]'
-  login_delay:
-    name: "Login Delay"
-    description: |
-      Time to wait for login page to load in seconds [Default: 1.0]
-      Note: Often can set to '0'
   zoom_level:
     name: "Zoom Level"
     description: "Zoom factor 100 = 100% [Default: 100]"

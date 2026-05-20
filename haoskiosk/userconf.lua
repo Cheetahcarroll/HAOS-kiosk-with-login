@@ -10,7 +10,8 @@ Code does the following:
     - Sets zooms level to value of $ZOOM_LEVEL (default 100%)
     - Sets new tab and window default to blank page (about:blank)
     - Loads every URL in 'passthrough' mode so that you can type text as needed without triggering browser commands
-    - Auto login to Home Assistant using $HA_USERNAME and $HA_PASSWORD
+    - Auto login to Home Assistant using configured HA users ($HA_USER_COUNT)
+      If multiple users are configured, show a touch-friendly picker on the auth page before login
     - Redefines key to return to normal mode (used for commands) from 'passthrough' mode to: 'Ctl+Alt+Esc'
       (rather than just 'Esc') to prevent unintended  returns to normal mode and activation of unwanted commands
     - Adds <Ctrl-r> binding to reload browser screen (all modes)
@@ -60,6 +61,21 @@ local defaults = {
     ZOOM_LEVEL = 100,
     BROWSER_REFRESH = 600,
                         }
+
+local ha_users_list = {}
+local ha_user_count = tonumber(os.getenv("HA_USER_COUNT") or "0") or 0
+for i = 0, ha_user_count - 1 do
+    local prefix = "HA_USER_" .. i .. "_"
+    table.insert(ha_users_list, {
+        user = os.getenv(prefix .. "LABEL") or ("User " .. (i + 1)),
+        username = os.getenv(prefix .. "USERNAME") or "",
+        password = os.getenv(prefix .. "PASSWORD") or "",
+    })
+end
+if #ha_users_list == 0 then
+    msg.error("Error: HA_USER_COUNT must be set and at least one user configured")
+    return
+end
 
 local ha_url = os.getenv("HA_URL") or defaults.HA_URL  -- Starting URL
 if not ha_url:match("^https?://[%w%.%-%%:]+[/%?%#]?[/%w%.%-%?%#%=%%]*$") then
@@ -120,8 +136,8 @@ end
 
 local onscreen_keyboard = os.getenv("ONSCREEN_KEYBOARD") == "true"
 
-msg.info("URL=%s; DARK_MODE=%s; SIDEBAR=%s; THEME=%s; ZOOM_LEVEL=%d, BROWSER_REFRESH=%d,  ONSCREEN_KEYBOARD=%s",
-    ha_url, tostring(dark_mode), sidebar, theme, zoom_level, browser_refresh, tostring(onscreen_keyboard))
+msg.info("URL=%s; HA_USERS=%d; DARK_MODE=%s; SIDEBAR=%s; THEME=%s; ZOOM_LEVEL=%d, BROWSER_REFRESH=%d,  ONSCREEN_KEYBOARD=%s",
+    ha_url, #ha_users_list, tostring(dark_mode), sidebar, theme, zoom_level, browser_refresh, tostring(onscreen_keyboard))
 
 -- -----------------------------------------------------------------------
 -- Forward console messages to stdout
@@ -164,6 +180,134 @@ local function single_quote_escape(str) -- Single quote strings before injection
     return str
 end
 
+local function double_quote_escape(str) -- Double quote strings before injection into JS
+    if not str or str == "" then return str end
+    str = str:gsub("\\", "\\\\")
+    str = str:gsub('"', '\\"')
+    str = str:gsub("\n", "\\n")
+    str = str:gsub("\r", "\\r")
+    return str
+end
+
+local function build_ha_users_json(users)
+    local parts = {}
+    for _, u in ipairs(users) do
+        table.insert(parts, string.format(
+            '{"user":"%s","username":"%s","password":"%s"}',
+            double_quote_escape(u.user or ""),
+            double_quote_escape(u.username or ""),
+            double_quote_escape(u.password or "")
+        ))
+    end
+    return "[" .. table.concat(parts, ",") .. "]"
+end
+
+local function build_js_auto_login(username, password)
+    return string.format([[
+        (function() {
+            try {
+                const haInputs = document.querySelectorAll('ha-input');
+                const usernameField = haInputs[0]?.shadowRoot?.querySelector('wa-input')?.shadowRoot?.querySelector('input[autocomplete="username"]')
+                    || document.querySelector('input[autocomplete="username"]');
+                const passwordField = haInputs[1]?.shadowRoot?.querySelector('wa-input')?.shadowRoot?.querySelector('input[autocomplete="current-password"]')
+                    || document.querySelector('input[autocomplete="current-password"]');
+                const haCheckbox = document.querySelector('ha-checkbox');
+                const submitButton = document.querySelector('ha-button');
+
+                if (usernameField && passwordField) {
+                    usernameField.value = '%s';
+                    usernameField.dispatchEvent(new Event('input', { bubbles: true }));
+                    usernameField.dispatchEvent(new Event('change', { bubbles: true }));
+
+                    passwordField.value = '%s';
+                    passwordField.dispatchEvent(new Event('input', { bubbles: true }));
+                    passwordField.dispatchEvent(new Event('change', { bubbles: true }));
+
+                    console.log('Auto-login: fields filled + events dispatched');
+                } else {
+                    console.log('Auto-login failed: missing elements', {
+                        username: !!usernameField,
+                        password: !!passwordField,
+                        submit: !!submitButton
+                    });
+                }
+
+                if (haCheckbox) {
+                    haCheckbox.setAttribute('checked', '');
+                    haCheckbox.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+
+                if (submitButton) submitButton.click();
+            } catch(e) { console.warn('Auto-login JS error:', e); }
+        })();
+    ]], single_quote_escape(username), single_quote_escape(password))
+end
+
+local function build_js_user_picker(users_json)
+    return string.format([[
+        (function() {
+            if (document.getElementById('haoskiosk-user-picker')) return;
+
+            const users = %s;
+            const overlay = document.createElement('div');
+            overlay.id = 'haoskiosk-user-picker';
+            overlay.style.cssText = [
+                'position:fixed', 'inset:0', 'z-index:2147483647',
+                'display:flex', 'flex-direction:column', 'align-items:center',
+                'justify-content:center', 'gap:1.25rem', 'padding:2rem',
+                'background:rgba(0,0,0,0.82)', 'font-family:sans-serif'
+            ].join(';');
+
+            const title = document.createElement('div');
+            title.textContent = 'Select user';
+            title.style.cssText = 'color:#fff;font-size:2rem;font-weight:600;margin-bottom:0.5rem';
+            overlay.appendChild(title);
+
+            function haosKioskLogin(username, password) {
+                const haInputs = document.querySelectorAll('ha-input');
+                const usernameField = haInputs[0]?.shadowRoot?.querySelector('wa-input')?.shadowRoot?.querySelector('input[autocomplete="username"]')
+                    || document.querySelector('input[autocomplete="username"]');
+                const passwordField = haInputs[1]?.shadowRoot?.querySelector('wa-input')?.shadowRoot?.querySelector('input[autocomplete="current-password"]')
+                    || document.querySelector('input[autocomplete="current-password"]');
+                const haCheckbox = document.querySelector('ha-checkbox');
+                const submitButton = document.querySelector('ha-button');
+
+                if (usernameField && passwordField) {
+                    usernameField.value = username;
+                    usernameField.dispatchEvent(new Event('input', { bubbles: true }));
+                    usernameField.dispatchEvent(new Event('change', { bubbles: true }));
+                    passwordField.value = password;
+                    passwordField.dispatchEvent(new Event('input', { bubbles: true }));
+                    passwordField.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                if (haCheckbox) {
+                    haCheckbox.setAttribute('checked', '');
+                    haCheckbox.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                if (submitButton) submitButton.click();
+            }
+
+            users.forEach(function(u) {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.textContent = u.user || u.username;
+                btn.style.cssText = [
+                    'min-width:min(90vw,28rem)', 'min-height:4.5rem', 'font-size:1.75rem',
+                    'border:none', 'border-radius:0.75rem', 'background:#03a9f4', 'color:#fff',
+                    'cursor:pointer', 'padding:0.75rem 1.5rem'
+                ].join(';');
+                btn.addEventListener('click', function() {
+                    overlay.remove();
+                    haosKioskLogin(u.username, u.password);
+                });
+                overlay.appendChild(btn);
+            });
+
+            document.body.appendChild(overlay);
+        })();
+    ]], users_json)
+end
+
 -- -----------------------------------------------------------------------
 -- Per-view weak table to track last URL for refresh debugging/reset detection
 local consecutive_load_failures = setmetatable({}, { __mode = "k" })  -- Weak keys per view to count consecutive reload failures
@@ -173,6 +317,7 @@ local consecutive_load_failures = setmetatable({}, { __mode = "k" })  -- Weak ke
 -- Auto-login to homeassistant (if on HA url) and set 'sidebar settings
 
 local ha_settings_applied = setmetatable({}, { __mode = "k" }) -- Flag to track if HA settings have already been applied in this session
+local auth_login_handled = setmetatable({}, { __mode = "k" }) -- Per-view flag: picker shown or auto-login started for this auth visit
 
 webview.add_signal("init", function(view)
     ha_settings_applied[view] = false  -- Set theme and sidebar settings once  per view
@@ -229,6 +374,35 @@ webview.add_signal("init", function(view)
 
         -- Force passthrough mode on every page load so don't inadvertently type commands in kiosk
         webview.window(v):set_mode("passthrough")
+
+        -- Reset auth login state when leaving the authorize page (e.g. after logout)
+        if v.uri and not v.uri:match("^" .. ha_url_base .. "/auth/authorize") then
+            auth_login_handled[v] = nil
+        end
+
+        -- Auto login user for Home Assistant
+        -- Check if current URL matches the Home Assistant auth page
+        if v.uri:match("^" .. ha_url_base .. "/auth/authorize%?response_type=code")
+           and not auth_login_handled[v] then
+            auth_login_handled[v] = true
+            msg.info("Authorizing: %s", v.uri) -- DEBUG
+
+            local function run_auth_login()
+                if not v.is_alive then return end
+
+                if #ha_users_list == 1 then
+                    local selected = ha_users_list[1]
+                    msg.info("Auto-login as %s", selected.user)
+                    v:eval_js(build_js_auto_login(selected.username, selected.password),
+                        { source = "auto_login.js", no_return = true })
+                else
+                    msg.info("Showing user picker (%d users)", #ha_users_list)
+                    v:eval_js(build_js_user_picker(build_ha_users_json(ha_users_list)),
+                        { source = "user_picker.js", no_return = true })
+                end
+            end
+
+        end
 
 
         -- Set Home Assistant theme and sidebar visibility after dashboard load
