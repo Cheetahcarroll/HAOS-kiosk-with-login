@@ -106,6 +106,9 @@ options:
   debug_mode: false
 
 schema:
+  user_logins:
+    - username: str
+      password: password
   ha_url: str
   ha_dashboard: str?
   zoom_level: int(10,1000)
