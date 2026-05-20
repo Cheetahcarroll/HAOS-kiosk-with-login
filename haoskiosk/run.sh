@@ -119,7 +119,6 @@ load_config_var() {
     fi
 }
 
-load_config_var HA_USERS []
 load_config_var HA_URL "http://localhost:8123"
 load_config_var HA_DASHBOARD ""
 load_config_var ZOOM_LEVEL 100
@@ -147,16 +146,28 @@ load_config_var COMMAND_WHITELIST "^$"  # Default is no commands allowed
 load_config_var DEBUG_MODE false
 load_config_var VNC_SERVER ""  1 #Mask password in log
 
-# Validate and expand HA_USERS (JSON array from config) into indexed env vars for userconf.lua
-HA_USERS_JSON="$HA_USERS"
+# Read ha_users as a JSON array from options.json.
+# NOTE: bashio::config unpacks arrays (one element per line), so it must not be used here.
+options="$(bashio::addon.config)"
+HA_USERS_JSON="$(bashio::jq "${options}" '.ha_users // []')"
+if ! echo "$HA_USERS_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+    # Upgrade path: older add-on options used user_logins instead of ha_users
+    legacy_user_count="$(bashio::jq "${options}" '(.user_logins // []) | length')"
+    if [ "${legacy_user_count:-0}" -gt 0 ]; then
+        bashio::log.warning "ha_users is empty; using legacy user_logins (re-save add-on config as ha_users)"
+        HA_USERS_JSON="$(bashio::jq "${options}" '[.user_logins[] | {user: (.username // "User"), username: .username, password: .password}]')"
+    fi
+fi
 if ! echo "$HA_USERS_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
     bashio::log.error "Error: At least one HA user must be configured in ha_users"
+    bashio::log.error "Check add-on Configuration -> User Logins (user, username, password for each entry)"
     exit 1
 fi
+export HA_USERS="$HA_USERS_JSON"
 
 HA_USER_COUNT="$(echo "$HA_USERS_JSON" | jq -r 'length')"
 export HA_USER_COUNT
-bashio::log.info "HA_USER_COUNT=$HA_USER_COUNT"
+bashio::log.info "Loaded %d HA user(s) from ha_users" "$HA_USER_COUNT"
 
 for ((i = 0; i < HA_USER_COUNT; i++)); do
     label="$(echo "$HA_USERS_JSON" | jq -r ".[$i].user // .[$i].username // \"User $((i + 1))\" | tostring")"

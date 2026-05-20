@@ -204,7 +204,7 @@ end
 
 local function build_js_auto_login(username, password)
     return string.format([[
-        (function() {
+        function() {
             try {
                 const haInputs = document.querySelectorAll('ha-input');
                 const usernameField = haInputs[0]?.shadowRoot?.querySelector('wa-input')?.shadowRoot?.querySelector('input[autocomplete="username"]')
@@ -239,13 +239,13 @@ local function build_js_auto_login(username, password)
 
                 if (submitButton) submitButton.click();
             } catch(e) { console.warn('Auto-login JS error:', e); }
-        })();
+        }());
     ]], single_quote_escape(username), single_quote_escape(password))
 end
 
 local function build_js_user_picker(users_json)
     return string.format([[
-        (function() {
+        function() {
             if (document.getElementById('haoskiosk-user-picker')) return;
 
             const users = %s;
@@ -304,7 +304,7 @@ local function build_js_user_picker(users_json)
             });
 
             document.body.appendChild(overlay);
-        })();
+        }();
     ]], users_json)
 end
 
@@ -401,7 +401,7 @@ webview.add_signal("init", function(view)
                         { source = "user_picker.js", no_return = true })
                 end
             end
-
+            run_auth_login()
         end
 
 
