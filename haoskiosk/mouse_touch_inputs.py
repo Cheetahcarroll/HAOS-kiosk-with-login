@@ -12,7 +12,7 @@
 """-------------------------------------------------------------------------------
 # HAOS Kiosk Display — Mouse & Touch Input Engine
 # File: MouseTouchInputs
-# Version: 1.3.3
+# Version: 1.3.4
 # Copyright Jeff Kosowsky
 # Date: May 2026
 #
@@ -369,7 +369,7 @@ from typing import Any, cast, Callable, ClassVar, Final, Iterator, NotRequired, 
 from Xlib import display                  #type: ignore[import-untyped] #pylint: disable=import-error
 from Xlib.xobject.drawable import Window  #type: ignore[import-untyped] #pylint: disable=import-error
 #-------------------------------------------------------------------------------
-__version__ = "1.3.3"
+__version__ = "1.3.4"
 __author__ = "Jeff Kosowsky"
 __copyright__ = "Copyright 2025-2026 Jeff Kosowsky"
 #-------------------------------------------------------------------------------
@@ -528,6 +528,15 @@ def is_valid_url(url: str) -> bool:
 #### Globals
 GESTURE_SEP = "_"
 _registry_lock: threading.RLock = threading.RLock()
+_closeout_timers: dict[int, threading.Timer] = {}
+MAX_PATH_EVENTS_PER_CONTACT = 128
+
+
+def _cancel_closeout_timer(device_id: int) -> None:
+    """Cancel and drop any pending double-click closeout timer for device_id."""
+    timer = _closeout_timers.pop(device_id, None)
+    if timer is not None:
+        timer.cancel()
 
 # ----------------------------------------------------------------------
 # Internally-defined, User callable functions
@@ -2219,13 +2228,31 @@ class ContactGroup(RegistryMixin):
                 if dev_id == device_id:
                     ContactGroup.unregister(key)
 
+    @classmethod
+    def clear_device_contact_refs(cls, device_id: int) -> None:
+        """Drop cached last/prev group references for device_id so completed groups can be collected."""
+        cls._last_group_added.pop(device_id, None)
+        cls._prev_group_added.pop(device_id, None)
+
+    @classmethod
+    def unregister_if_registered(cls, group: "ContactGroup") -> None:
+        """Remove group from registry when sequence or closeout retains the only strong reference."""
+        if group.is_registered():
+            cls.unregister(group.id)
+
     def add_event(self, contact_id: int, contact_time: float, contact_pos: tuple[int, int], state: ContactState) -> None:
         """Add event for contact_id consisting of current: time, position and state of the specific contact"""
         if contact_id not in self.path:  # Add event to path
             self.path[contact_id] = []
 
         self.last_event = (contact_time, contact_pos, state)
-        self.path[contact_id].append(self.last_event)  # Append new event
+        path_list = self.path[contact_id]
+        if state is ContactState.MOTION and path_list and path_list[-1][2] is ContactState.MOTION:
+            path_list[-1] = self.last_event  # Coalesce consecutive motion samples
+        elif state is ContactState.MOTION and len(path_list) >= MAX_PATH_EVENTS_PER_CONTACT:
+            path_list[-1] = self.last_event  # Hard cap: keep updating latest position only
+        else:
+            path_list.append(self.last_event)
 
         if state is ContactState.PRESS:
             self.current_pressed.append(contact_id)
@@ -2233,9 +2260,6 @@ class ContactGroup(RegistryMixin):
             if num_current_contacts > self.peak_contacts:
                 self.peak_contacts = num_current_contacts
                 self.peak_contacts_members = set(self.current_pressed)
-
-        elif state is ContactState.MOTION:
-            pass  # Just add to path
 
         elif state is ContactState.RELEASE:
             if contact_id in self.current_pressed:
@@ -2387,6 +2411,8 @@ class GestureSequence(RegistryMixin):
             if num_groups == 0:  # Sequence is blank, can't be closed out # Shouldn't happen
                 return False
 
+            _cancel_closeout_timer(self.device_id)
+
             gesture, duration, movement, velocity = gesture_data  #pylint: disable=unused-variable
 
             gesture_command = GestureCommand(self.device_type, RangeNumber(self.contacts_num), self.contacts_members, RangeNumber(num_groups), gesture) #pylint: disable=too-many-function-args
@@ -2397,7 +2423,9 @@ class GestureSequence(RegistryMixin):
             debug(4, "   " + repr(self))
 
             ContactGroup.unregister_all(self.device_id)
+            ContactGroup.clear_device_contact_refs(self.device_id)
             GestureSequence.unregister(self.id)
+            self.groups.clear()
 
         gesture_command_match = gesture_command.lookup()  # Lookup gesture in command dictionary
         if gesture_command_match is not None:  #Match found
@@ -2418,16 +2446,21 @@ class GestureSequence(RegistryMixin):
         """ Queue closeout sequence to run in 'timeout' seconds"""
 
         last_group = self.last_group
+        device_id = self.device_id
 
         def timer_callback() -> None:
-            if not self.is_registered() or last_group != ContactGroup.last_group_added(self.device_id):  # Sequence already completed (and unregistered) or new last group added
+            _closeout_timers.pop(device_id, None)
+            if not self.is_registered() or last_group != ContactGroup.last_group_added(device_id):  # Sequence already completed (and unregistered) or new last group added
                 return  # Abort
             debug(3, f"   Timeout={sec_to_ms(timeout,1)}ms time={truncate_time(self.end_time)} [{repr(self)}]")
             self.closeout_sequence(gesture_data)
 
-        timer = threading.Timer(timeout, timer_callback)
-        timer.daemon = False
-        timer.start()
+        with _registry_lock:
+            _cancel_closeout_timer(device_id)
+            timer = threading.Timer(timeout, timer_callback)
+            timer.daemon = True
+            _closeout_timers[device_id] = timer
+            timer.start()
 
 #-------------------------------------------------------------------------------
 #### XInputEvent and XInputParser classes
@@ -2739,6 +2772,8 @@ def process_PRESS(ev: XInputEventFilled) -> None:
         between_presses_string = ""
         group = ContactGroup.last_group_added(ev.device_id)
         if not group or group.is_complete:  # Create and register new contact group if no incomplete group exists for ev.device_id
+            if group is not None and group.is_complete:
+                ContactGroup.unregister_if_registered(group)
             group = ContactGroup(ev.device_id, ev.device_type, ev.detail, ev.time, ev.position)
             prev_group = ContactGroup.prev_group_added(ev.device_id)
             if prev_group is not None:  # Calculate time since previous new  press
@@ -2778,6 +2813,8 @@ def process_RELEASE(ev: XInputEventFilled) -> None:
                 else:  # Start new sequence for new group
                     seq = GestureSequence(group)
                     debug(4, group.sprint(f" [groups={len(seq.groups)}]"))
+
+                ContactGroup.unregister_if_registered(group)
 
                 time_to_double_click_timeout = group.time_to_double_click_timeout
                 if single_click_gesture or time_to_double_click_timeout < 0: # Possible to closeout sequence now

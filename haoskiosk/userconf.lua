@@ -1,7 +1,7 @@
 --[=[
 Add-on: HAOS Kiosk Display (haoskiosk)
 File: userconf.lua for HA minimal browser run on server
-Version: 1.3.3
+Version: 1.3.4
 Copyright Jeff Kosowsky
 Date: May 2026
 
@@ -255,7 +255,8 @@ local function build_js_user_picker(users_json)
     return string.format([[
         setTimeout(function() {
             try {
-            if (document.getElementById('haoskiosk-user-picker')) return;
+            const existingPicker = document.getElementById('haoskiosk-user-picker');
+            if (existingPicker) existingPicker.remove();
 
             const users = %s;
             const overlay = document.createElement('div');
@@ -451,16 +452,16 @@ webview.add_signal("init", function(view)
         -- Force passthrough mode on every page load so don't inadvertently type commands in kiosk
         webview.window(v):set_mode("passthrough")
 
-        -- Reset auth login state when leaving the authorize page (e.g. after logout)
-        if v.uri and not is_auth_authorize_page(v.uri) then
+        -- Auth page: reset on every load/refresh so the user picker can be shown again
+        if v.uri and is_auth_authorize_page(v.uri) then
             auth_login_handled[v] = nil
             stop_auth_login_timer(v)
-        end
-
-        -- User picker on the Home Assistant login / authorize page
-        if is_auth_authorize_page(v.uri) and not auth_login_handled[v] and not auth_login_timers[v] then
             msg.info("Auth page detected (%d users): %s", #ha_users_list, v.uri)
             start_auth_login_flow(v)
+        elseif v.uri then
+            -- Left auth page (logged in, logout, etc.): clear state for next visit
+            auth_login_handled[v] = nil
+            stop_auth_login_timer(v)
         end
 
 

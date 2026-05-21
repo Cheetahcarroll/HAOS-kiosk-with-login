@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.3.4 - May 2026
+
+- Fixed memory leaks
+- Fixed bug where user prompt doesn't come back up after a browser refresh
+
 ## v1.3.3 - May 2026
 
 - Added Support for Multi User Login

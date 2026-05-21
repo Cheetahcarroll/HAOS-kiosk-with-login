@@ -3,7 +3,7 @@ name: "HAOS Kiosk Display with Login"
 description: |
   Start X server and browser on local HAOS server and display dashboards in
   kiosk mode with support for multi user login
-version: "1.3.3"
+version: "1.3.4"
 slug: "haoskiosk-with-login"
 url: https://github.com/cheetahcarroll/HAOS-kiosk-with-login/tree/main/haoskiosk
 

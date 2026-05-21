@@ -1,9 +1,9 @@
 ################################################################################
 # Add-on: HAOS Kiosk Display (haoskiosk)
 # File: Dockerfile
-# Version: 1.3.3
+# Version: 1.3.4
 # Copyright Jeff Kosowsky
-# Date: April 2026
+# Date: May 2026
 ################################################################################
 
 ARG BUILD_FROM=ghcr.io/home-assistant/base:latest
