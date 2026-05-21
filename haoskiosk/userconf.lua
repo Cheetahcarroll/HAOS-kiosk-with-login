@@ -51,8 +51,6 @@ local HARD_RELOAD_FREQ = 10  -- Frequency of fully reloading cache when refreshi
 local MAX_LOAD_FAILURES = 5  -- Maximum number of consecutive page (re)load failures per view before restarting luakit
 local AUTH_LOGIN_DELAY_MS = 1000   -- Wait for HA auth web components before injecting picker/login JS
 local AUTH_LOGIN_RETRY_MS = 1000   -- Retry interval while auth page is still loading
-local AUTH_LOGIN_MAX_ATTEMPTS = 15 -- Stop retrying after this many attempts
-
 
 -- Load in environment variables to configure options
 local defaults = {
@@ -381,16 +379,7 @@ local function start_auth_login_flow(v)
             return
         end
 
-        attempt = attempt + 1
-        if attempt > AUTH_LOGIN_MAX_ATTEMPTS then
-            msg.warn("User picker timed out after %d attempts: %s", AUTH_LOGIN_MAX_ATTEMPTS, v.uri or "")
-            finish()
-            return
-        end
-
         -- Always show the picker when any users are configured (touch to choose account)
-        msg.info("User picker attempt %d/%d (%d users): %s",
-            attempt, AUTH_LOGIN_MAX_ATTEMPTS, #ha_users_list, v.uri or "")
         v:eval_js(build_js_user_picker(build_ha_users_json(ha_users_list)),
             { source = "user_picker.js", no_return = true })
         auth_picker_visible(v, function(visible)
